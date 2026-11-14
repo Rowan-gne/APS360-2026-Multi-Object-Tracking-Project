@@ -1,0 +1,15 @@
+# MOT17 data (about 5.7 GB): never commit it.
+# Only the data subfolders are ignored, so the notebook in MOT17/MOT17/ stays trackable.
+MOT17/MOT17/train/
+MOT17/MOT17/test/
+
+# Generated files (CSVs, figures, reports). The notebook rebuilds them.
+outputs/
+
+# Python and Jupyter caches
+__pycache__/
+.ipynb_checkpoints/
+
+# Model weights / checkpoints
+*.pt
+*.pth
