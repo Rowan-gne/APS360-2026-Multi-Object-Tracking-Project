@@ -10,3 +10,12 @@ matplotlib
 torch
 torchvision
 ipykernel
+
+# DeepSORT baseline (DeepSORT baseline.ipynb)
+# DeepSORT (PyTorch version); also installs opencv-python. Tested: 1.3.2
+deep-sort-realtime
+# TrackEval, the official MOTChallenge scoring code (HOTA, MOTA, IDF1). Tested: 1.0.dev1
+git+https://github.com/JonathonLuiten/TrackEval.git
+# deep-sort-realtime loads its appearance network with pkg_resources, which setuptools removed in v81.
+# (torch only needs setuptools>=77.0.3, so this pin doesn't affect it.) Tested: 80.10.2
+setuptools<81
