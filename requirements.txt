@@ -1,8 +1,15 @@
 # Packages used by the project. Install with:  pip install -r requirements.txt
 # Tested with: numpy 2.4.3, pandas 3.0.1, pillow 12.1.1, matplotlib 3.10.8,
-#              torch 2.14.0, torchvision 0.29.0, ipykernel 7.1.0 (Python 3.14)
-# Note: a plain "pip install torch" gives the CPU-only build. For GPU training,
-# install the CUDA build from the selector at https://pytorch.org instead.
+#              torch 2.14.0+cu130, torchvision 0.29.0+cu130, ipykernel 7.1.0 (Python 3.14)
+#
+# GPU (the default for every model in this project; the CPU is only a fallback):
+# a plain "pip install torch" gives the CPU-only build on Windows. Install the CUDA builds FIRST, from
+# PyTorch's own index, then the rest of this file:
+#   pip uninstall -y torch torchvision
+#   pip install torch==2.14.0+cu130 torchvision==0.29.0+cu130 --index-url https://download.pytorch.org/whl/cu130
+# CUDA 12.8 or newer is required for RTX 50-series (Blackwell, sm_120) cards; for torch 2.14 on Python 3.14
+# the newest CUDA index (cu130) has the builds. Check with:
+#   python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 numpy
 pandas
 pillow

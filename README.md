@@ -8,6 +8,9 @@ Deep learning model for multi-object tracking (MOT) on the MOT17 dataset (APS360
 pip install -r requirements.txt
 ```
 
+Models run on the GPU by default (each notebook prints its `DEVICE` and warns if it falls back to the CPU).
+Install the CUDA build of PyTorch first; the commands are at the top of `requirements.txt`.
+
 ## Where to put the MOT17 data
 
 Download MOT17 from https://motchallenge.net/data/MOT17/ and unzip it so the folders sit here:

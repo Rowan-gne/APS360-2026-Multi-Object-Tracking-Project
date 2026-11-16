@@ -189,9 +189,28 @@ def collate_pairs(items):
     return collate_frames([p[0] for p in items]), collate_frames([p[1] for p in items])
 
 
-def make_loader(dataset, split, batch_size=2, num_workers=0):
+def make_loader(dataset, split, batch_size=2, num_workers=0, pin_memory=None):
     """Training data is shuffled; validation and test keep their order. num_workers=0 loads frames in the
-    notebook's own process (simplest); a larger number loads them in parallel worker processes."""
+    notebook's own process (simplest); a larger number loads them in parallel worker processes.
+    pin_memory (default: on when CUDA is available) puts batches in page-locked memory, which copies to the GPU faster."""
     collate = collate_pairs if isinstance(dataset, MOT17FramePairs) else collate_frames
+    if pin_memory is None:
+        pin_memory = torch.cuda.is_available()
     return DataLoader(dataset, batch_size=batch_size, shuffle=(split == "train"), collate_fn=collate,
-                      num_workers=num_workers)
+                      num_workers=num_workers, pin_memory=pin_memory)
+
+
+def batch_to_device(batch, device):
+    """Move a batch from make_loader to `device` (e.g. the notebook's DEVICE): every tensor, including the
+    per-frame lists of boxes and IDs. Works for frame batches and for (t-1, t) pair batches."""
+    if isinstance(batch, tuple):
+        return tuple(batch_to_device(b, device) for b in batch)
+    moved = {}
+    for key, value in batch.items():
+        if torch.is_tensor(value):
+            moved[key] = value.to(device, non_blocking=True)
+        elif isinstance(value, list) and value and torch.is_tensor(value[0]):
+            moved[key] = [v.to(device, non_blocking=True) for v in value]
+        else:
+            moved[key] = value          # video names and frame numbers stay as they are
+    return moved
