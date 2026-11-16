@@ -55,3 +55,19 @@ train_loader = mot17_data.make_loader(train_set, "train")
 
 Edit data loading in the notebook's section 0, not in `mot17_data.py` (it is overwritten on every run).
 Run order: `Exploratory data analysis.ipynb` first, then `DeepSORT baseline.ipynb` or the model notebook.
+
+## DeepSORT baseline
+
+`MOT17/MOT17/DeepSORT baseline.ipynb` runs the full baseline on MOT17-10 (validation) and MOT17-13 (test):
+our own Faster R-CNN (torchvision ResNet-50-FPN, COCO-pretrained, not fine-tuned) detects people on the raw frames,
+DeepSORT tracks them, and TrackEval scores them. MOT17's supplied detections (`det/det.txt`) are not used.
+The first run downloads the Faster R-CNN weights (about 160 MB) into PyTorch's cache folder.
+
+Results go to `outputs/deepsort/` (git-ignored):
+
+- `results.csv`, `deepsort_report.md`: HOTA, MOTA, IDF1, ID switches, false positives/negatives, speeds, detector recall
+- `detections/`: the detector's boxes per video, reused on the next run if the weights, threshold and torchvision
+  version match (set `RERUN_DETECTOR = True` to force a fresh run)
+- `trackers/`, `eval/`: tracker output files and TrackEval's output; `figures/`: frames with track IDs drawn
+
+The earlier run that used MOT17's supplied detections is kept in `outputs/archive/deepsort_supplied_detections/`.
