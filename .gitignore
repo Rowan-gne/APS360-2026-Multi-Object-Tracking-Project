@@ -6,6 +6,9 @@ MOT17/MOT17/test/
 # Generated files (CSVs, figures, reports). The notebook rebuilds them.
 outputs/
 
+# The project's Python environment (rebuild with requirements.txt)
+.venv/
+
 # Python and Jupyter caches
 __pycache__/
 .ipynb_checkpoints/

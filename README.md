@@ -4,12 +4,17 @@ Deep learning model for multi-object tracking (MOT) on the MOT17 dataset (APS360
 
 ## Setup
 
+The project uses its own Python environment, `.venv` (Python 3.14, CUDA build of PyTorch). Create it once from the project folder:
+
 ```
-pip install -r requirements.txt
+py -3.14 -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m ipykernel install --user --name mot17-venv --display-name "MOT17 (.venv)"
 ```
 
-Models run on the GPU by default (each notebook prints its `DEVICE` and warns if it falls back to the CPU).
-Install the CUDA build of PyTorch first; the commands are at the top of `requirements.txt`.
+VS Code uses `.venv` automatically (`.vscode/settings.json`), and the notebooks use the "MOT17 (.venv)" kernel.
+In a terminal outside VS Code, run `.venv\Scripts\activate` first, so `python` and `pip` are the project's.
+Models run on the GPU by default.
 
 ## Where to put the MOT17 data
 
