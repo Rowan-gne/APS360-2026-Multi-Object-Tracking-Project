@@ -1,216 +1,105 @@
-"""
-mot17_data.py: the ONE definition of how every notebook loads the prepared MOT17 data.
-
-WRITTEN BY "Exploratory data analysis.ipynb" (section 0). Don't edit this file by hand: edit that
-cell and re-run the notebook, so all data preparation stays in one place.
-
-Use it from any notebook in MOT17/MOT17/:
-    import mot17_data
-    print(mot17_data.data_version())                  # stops if the prepared data is missing or changed
-    train_set = mot17_data.MOT17Frames("train")       # one item per frame (model input + ground truth)
-    train_loader = mot17_data.make_loader(train_set, "train")
-"""
-import hashlib
+"""Shared MOT17 data code. WRITTEN BY 'Exploratory data analysis.ipynb': edit it there, then re-run that notebook."""
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms import functional as TF
 
-# ---- Paths, worked out from where this file is, so they're the same in every notebook ----
-DATA_ROOT = Path(__file__).resolve().parent      # MOT17/MOT17/: holds train/ and test/ (read-only)
+DATA_ROOT = Path(__file__).resolve().parent        # MOT17/MOT17 (train/ and test/ are read-only)
 PROJECT_ROOT = DATA_ROOT.parents[1]
-OUTPUT_DATA = PROJECT_ROOT / "outputs" / "data"  # the prepared files written by the EDA notebook
-MANIFEST = OUTPUT_DATA / "manifest.json"         # MD5 of every prepared file (written last by the EDA notebook)
-
-# ---- Settings every notebook shares ----
-DETECTOR_COPY = "FRCNN"                          # the copy of each video used throughout the project
-TARGET_WIDTH, TARGET_HEIGHT = 1920, 1088         # the model's input size (every frame is resized to this)
-SPLITS = ["train", "val", "test"]
+PREPARED = PROJECT_ROOT / "outputs" / "data"        # written by the EDA notebook
+WIDTH, HEIGHT = 1920, 1088                          # the model's input size
 
 
-# ---------------------------------------------------------------- prepared files
-def file_md5(path):
-    """MD5 hash of a file's bytes: an unchanged file keeps the same hash."""
-    return hashlib.md5(Path(path).read_bytes()).hexdigest()
+def read(name):
+    """A prepared table: "videos", "frames" or "boxes"."""
+    return pd.read_csv(PREPARED / f"{name}.csv")
 
 
-def data_version():
-    """Check every prepared file, and this file, are exactly what the EDA notebook wrote, and return a short ID for
-    this version of the data (record it next to any results). Raises an error if a file is missing or changed."""
-    if not MANIFEST.exists():
-        raise FileNotFoundError(f"{MANIFEST} not found. Run 'Exploratory data analysis.ipynb' first (Restart -> Run all).")
-    manifest = json.loads(MANIFEST.read_text())
-    if file_md5(__file__) != manifest["code_md5"]:
-        raise RuntimeError("mot17_data.py differs from the version the EDA notebook wrote. Make changes in the "
-                           "notebook's section 0 and re-run 'Exploratory data analysis.ipynb'.")
-    for name, md5 in manifest["files"].items():
-        path = OUTPUT_DATA / name
-        if not path.exists():
-            raise FileNotFoundError(f"{path} is missing. Re-run 'Exploratory data analysis.ipynb'.")
-        if file_md5(path) != md5:
-            raise RuntimeError(f"{path} changed after the EDA notebook wrote it. Re-run 'Exploratory data analysis.ipynb'.")
-    return manifest["version"]
+def open_frame(image_path):
+    """One frame at its original size, RGB."""
+    with Image.open(DATA_ROOT / image_path) as image:
+        return image.convert("RGB")
 
 
-def read_prepared(name):
-    """Read one prepared file from outputs/data/: "frames", "boxes", "videos", "detections" (tables) or
-    "pixel_stats" (a dictionary). Split files are named like "splits/train_boxes"."""
-    path = OUTPUT_DATA / (f"{name}.json" if name == "pixel_stats" else f"{name}.csv")
-    if not path.exists():
-        raise FileNotFoundError(f"{path} not found. Run 'Exploratory data analysis.ipynb' first.")
-    return json.loads(path.read_text()) if path.suffix == ".json" else pd.read_csv(path)
-
-
-# ---------------------------------------------------------------- frames
-def open_original(image_path):
-    """Open one frame (path relative to DATA_ROOT, as in frames.csv) as an RGB image at its ORIGINAL size.
-    Used by DeepSORT, which works in original pixels."""
-    with Image.open(DATA_ROOT / image_path) as img:
-        return img.convert("RGB")
-
-
-def open_resized(image_path):
-    """Open one frame as an RGB image resized to 1920 x 1088 (the model's input size). Nothing is cropped or padded."""
-    return open_original(image_path).resize((TARGET_WIDTH, TARGET_HEIGHT), Image.BILINEAR)
-
-
-def load_frame(image_path, mean=None, std=None):
-    """Turn one frame into the model's input: a float tensor [3, 1088, 1920].
-    1. resize to 1920 x 1088
-    2. scale pixels from 0-255 to 0-1 (what transforms.ToTensor() does)
-    3. if mean and std are given, normalize each colour channel: (pixel - mean) / std
-    """
-    image = TF.to_tensor(open_resized(image_path))     # [3, 1088, 1920], values 0-1
-    if mean is not None:
-        image = TF.normalize(image, mean, std)
-    return image
-
-
-# ---------------------------------------------------------------- boxes
 def boxes_to_pixels(boxes, image_width, image_height):
-    """Boxes stored as (cx, cy, w, h) fractions of the ORIGINAL frame -> (left, top, width, height) in original pixels.
-    `boxes` is a table with columns cx, cy, w, h; the sizes are numbers or columns of the same length.
-    Rounded to 6 decimals: converting to fractions and back leaves noise of about 1e-13 px (e.g. 1288.9999999999995
-    instead of 1289), and code that cuts boxes out with whole pixels (DeepSORT's appearance crops) would then be
-    one pixel off. gt.txt values are whole numbers, so rounding gives back exactly the gt.txt values."""
-    width = boxes["w"] * image_width
-    height = boxes["h"] * image_height
-    pixels = pd.DataFrame({"left": boxes["cx"] * image_width - width / 2,
-                           "top": boxes["cy"] * image_height - height / 2,
-                           "width": width, "height": height}, index=boxes.index)
-    return pixels.round(6)
+    """(cx, cy, w, h) fractions of the frame -> left, top, width, height in pixels.
+    Rounded to 6 decimals, so the round trip gives back exactly the whole-pixel values of gt.txt."""
+    w, h = boxes["w"] * image_width, boxes["h"] * image_height
+    return pd.DataFrame({"left": boxes["cx"] * image_width - w / 2, "top": boxes["cy"] * image_height - h / 2,
+                         "width": w, "height": h}).round(6)
 
 
-# ---------------------------------------------------------------- PyTorch datasets
 class MOT17Frames(Dataset):
-    """One item per frame of a split ("train", "val" or "test").
+    """One item per frame of a split: image [3, 1088, 1920] (resized, 0-1, normalized), boxes [N, 4]
+    (cx, cy, w, h fractions), ids [N], visibility [N], orig_size (width, height), video, frame."""
 
-    Each item is a dictionary:
-      image       float tensor [3, 1088, 1920]: resized, scaled to 0-1, normalized with pixel_stats.json
-      orig_size   tensor [2] = (original width, original height), to turn outputs back into original pixels
-      boxes       float tensor [N, 4] = (cx, cy, w, h) as 0-1 fractions of the original frame
-      ids         int tensor [N] = person IDs (only meaningful within one video)
-      video, frame  which frame this is
-    """
-
-    def __init__(self, split, normalize=True):
-        self.data_version = data_version()            # stops here if the prepared data is missing or changed
-        frames = read_prepared("frames")
+    def __init__(self, split):
+        frames = read("frames")
         self.frames = frames[frames["split"] == split].sort_values(["video", "frame"]).reset_index(drop=True)
-        boxes = read_prepared("boxes")
+        boxes = read("boxes")
         boxes = boxes[boxes["split"] == split]
-        # Group the boxes by frame once, so looking up a frame's boxes is fast.
-        self.targets = {
-            key: (torch.tensor(g[["cx", "cy", "w", "h"]].to_numpy(), dtype=torch.float32),
-                  torch.tensor(g["id"].to_numpy(), dtype=torch.int64))
-            for key, g in boxes.groupby(["video", "frame"])
-        }
-        stats = read_prepared("pixel_stats")
-        self.mean = stats["mean"] if normalize else None
-        self.std = stats["std"] if normalize else None
+        self.boxes = {key: g[["cx", "cy", "w", "h", "id", "visibility"]].to_numpy()
+                      for key, g in boxes.groupby(["video", "frame"])}
+        stats = json.loads((PREPARED / "pixel_stats.json").read_text())
+        self.mean, self.std = stats["mean"], stats["std"]
 
     def __len__(self):
         return len(self.frames)
 
-    def __getitem__(self, index):
-        row = self.frames.iloc[index]
-        key = (row["video"], int(row["frame"]))
-        # A frame with no pedestrians gets empty tensors.
-        boxes, ids = self.targets.get(key, (torch.zeros((0, 4)), torch.zeros(0, dtype=torch.int64)))
-        return {
-            "image": load_frame(row["image_path"], self.mean, self.std),
-            "orig_size": torch.tensor([int(row["image_width"]), int(row["image_height"])]),
-            "boxes": boxes,
-            "ids": ids,
-            "video": row["video"],
-            "frame": int(row["frame"]),
-        }
+    def __getitem__(self, i):
+        row = self.frames.iloc[i]
+        b = self.boxes.get((row["video"], row["frame"]), np.zeros((0, 6)))
+        image = open_frame(row["image_path"]).resize((WIDTH, HEIGHT), Image.BILINEAR)
+        return {"image": TF.normalize(TF.to_tensor(image), self.mean, self.std),
+                "boxes": torch.tensor(b[:, :4], dtype=torch.float32),
+                "ids": torch.tensor(b[:, 4], dtype=torch.int64),
+                "visibility": torch.tensor(b[:, 5], dtype=torch.float32),
+                "orig_size": (int(row["image_width"]), int(row["image_height"])),
+                "video": row["video"], "frame": int(row["frame"])}
 
 
 class MOT17FramePairs(Dataset):
-    """One item per pair of consecutive frames (t-1, t) of the same video: returns (item at t-1, item at t).
-    The IDs show which box in frame t is which person in frame t-1, which is what the transformer learns from."""
+    """One item per pair of consecutive frames (t-1, t) of the same video."""
 
-    def __init__(self, split, normalize=True):
-        self.frames = MOT17Frames(split, normalize)
-        self.data_version = self.frames.data_version
-        table = self.frames.frames
-        position = {(v, f): i for i, (v, f) in enumerate(zip(table["video"], table["frame"]))}
-        # Pair each frame with the frame just before it, only if that frame exists (same video, frame number - 1).
-        self.pairs = [(position[(v, f - 1)], i) for i, (v, f) in enumerate(zip(table["video"], table["frame"]))
-                      if (v, f - 1) in position]
+    def __init__(self, split):
+        self.frames = MOT17Frames(split)
+        f = self.frames.frames
+        self.pairs = [i for i in range(1, len(f))
+                      if f["video"][i] == f["video"][i - 1] and f["frame"][i] == f["frame"][i - 1] + 1]
 
     def __len__(self):
         return len(self.pairs)
 
-    def __getitem__(self, index):
-        previous, current = self.pairs[index]
-        return self.frames[previous], self.frames[current]
+    def __getitem__(self, i):
+        j = self.pairs[i]
+        return self.frames[j - 1], self.frames[j]
 
 
-def collate_frames(items):
-    """Batch frames: images stack into [B, 3, 1088, 1920]; boxes and IDs stay as lists (frames have different numbers of boxes)."""
-    return {
-        "images": torch.stack([item["image"] for item in items]),
-        "orig_sizes": torch.stack([item["orig_size"] for item in items]),
-        "boxes": [item["boxes"] for item in items],
-        "ids": [item["ids"] for item in items],
-        "videos": [item["video"] for item in items],
-        "frames": [item["frame"] for item in items],
-    }
+def collate(items):
+    """Images stack into [B, 3, 1088, 1920]; everything else stays a list (frames have different numbers of boxes).
+    Pairs give (batch of frames t-1, batch of frames t)."""
+    if isinstance(items[0], tuple):
+        return collate([p[0] for p in items]), collate([p[1] for p in items])
+    batch = {key: [item[key] for item in items] for key in items[0]}
+    batch["image"] = torch.stack(batch["image"])
+    return batch
 
 
-def collate_pairs(items):
-    """Batch pairs: returns (batch of t-1 frames, batch of t frames). A pair's two frames stay together and in order."""
-    return collate_frames([p[0] for p in items]), collate_frames([p[1] for p in items])
+def make_loader(dataset, shuffle, batch_size=2, num_workers=0):
+    """Shuffle only training data. pin_memory (on CUDA) copies batches to the GPU faster; persistent workers
+    aren't restarted every epoch."""
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, collate_fn=collate, num_workers=num_workers,
+                      pin_memory=torch.cuda.is_available(), persistent_workers=num_workers > 0)
 
 
-def make_loader(dataset, split, batch_size=2, num_workers=0, pin_memory=None):
-    """Training data is shuffled; validation and test keep their order. num_workers=0 loads frames in the
-    notebook's own process (simplest); a larger number loads them in parallel worker processes.
-    pin_memory (default: on when CUDA is available) puts batches in page-locked memory, which copies to the GPU faster."""
-    collate = collate_pairs if isinstance(dataset, MOT17FramePairs) else collate_frames
-    if pin_memory is None:
-        pin_memory = torch.cuda.is_available()
-    return DataLoader(dataset, batch_size=batch_size, shuffle=(split == "train"), collate_fn=collate,
-                      num_workers=num_workers, pin_memory=pin_memory)
-
-
-def batch_to_device(batch, device):
-    """Move a batch from make_loader to `device` (e.g. the notebook's DEVICE): every tensor, including the
-    per-frame lists of boxes and IDs. Works for frame batches and for (t-1, t) pair batches."""
+def to_device(batch, device):
+    """Move a batch (or a (t-1, t) pair of batches) to the device: the images and every box / ID tensor."""
     if isinstance(batch, tuple):
-        return tuple(batch_to_device(b, device) for b in batch)
-    moved = {}
-    for key, value in batch.items():
-        if torch.is_tensor(value):
-            moved[key] = value.to(device, non_blocking=True)
-        elif isinstance(value, list) and value and torch.is_tensor(value[0]):
-            moved[key] = [v.to(device, non_blocking=True) for v in value]
-        else:
-            moved[key] = value          # video names and frame numbers stay as they are
-    return moved
+        return tuple(to_device(b, device) for b in batch)
+    move = lambda v: v.to(device, non_blocking=True) if torch.is_tensor(v) else v
+    return {k: move(v) if torch.is_tensor(v) else [move(x) for x in v] for k, v in batch.items()}

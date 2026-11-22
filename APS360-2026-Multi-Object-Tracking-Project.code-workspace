@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "APS360-2026-Multi-Object-Tracking-Project",
+			"path": "."
+		},
+		{
+			"name": "MOT17",
+			"path": "../../Downloads/MOT17"
+		}
+	],
+	"settings": {}
+}
